@@ -1,0 +1,37 @@
+# Route S (simplified) gateway template: AimiliVPN (OpenMili/aimili-vpngate) run at runtime.
+# This file is an original placeholder template written for this skill; it vendors NO upstream code.
+# Before use: pin the upstream release/commit you actually verified, prefer building from source
+# over a floating image tag, and re-check upstream compose for field changes (see templates/SOURCES.md).
+services:
+  aimilivpn:
+    # Option 1 (preferred for auditability): build from the pinned upstream checkout you cloned yourself.
+    build: ./aimili-vpngate
+    # Option 2: use an image ONLY if you verified its publisher/digest yourself; never float on :latest.
+    # image: <REGISTRY_IMAGE>@sha256:<DIGEST_YOU_VERIFIED>
+    container_name: aimilivpn-<NAME>
+    network_mode: host
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      DEPLOYMENT_MODE: docker
+      VPNGATE_DATA_DIR: /data
+      # Bind the panel to localhost and reach it via SSH tunnel unless you have restricted
+      # the cloud security group to your own IP. 待实测确认: UI_HOST values in your pinned version.
+      UI_HOST: "127.0.0.1"
+      UI_PORT: "<PANEL_PORT>"
+      LOCAL_PROXY_HOST: "127.0.0.1"
+      LOCAL_PROXY_PORT: "<SOCKS_PORT>"
+    volumes:
+      - aimilivpn-<NAME>-data:/data
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  aimilivpn-<NAME>-data:

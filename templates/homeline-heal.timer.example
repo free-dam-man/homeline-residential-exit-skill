@@ -1,0 +1,22 @@
+# /etc/systemd/system/homeline-heal-<cc>.timer  — default every 12 hours (adjustable: change OnCalendar,
+# e.g. *:0/30 for 30 min). Pair with homeline-heal-<cc>.service (below).
+[Unit]
+Description=Run homeline heal <CC> every 12 hours
+[Timer]
+OnCalendar=*-*-* 00/12:07:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=homeline-heal-<cc>.service
+[Install]
+WantedBy=timers.target
+
+# /etc/systemd/system/homeline-heal-<cc>.service
+# [Unit]
+# Description=Homeline heal <CC>
+# After=docker.service
+# [Service]
+# Type=oneshot
+# Nice=10
+# MemoryMax=80M
+# TimeoutStartSec=280
+# ExecStart=/root/homeline-test/heal/heal.sh <CC> <gateway_container> /root/homeline-test/<routea_dir> <socks_port>

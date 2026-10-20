@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+# usage: fetch.py CC OUTDIR LIMIT [exclude_ovpn]  -> writes cand-CC-NN.ovpn (tcp only, by score)
+import urllib.request, csv, io, base64, os, sys, glob
+cc, out, lim = sys.argv[1], sys.argv[2], int(sys.argv[3])
+excl = set()
+if len(sys.argv) > 4 and os.path.exists(sys.argv[4]):
+    excl = {l.split()[1] for l in open(sys.argv[4]) if l.startswith('remote ')}
+for f in glob.glob(f"{out}/cand-{cc}-*.ovpn"): os.remove(f)
+raw = urllib.request.urlopen("https://www.vpngate.net/api/iphone/", timeout=40).read().decode(errors='ignore')
+lines = [l for l in raw.splitlines() if l and not l.startswith('*')]
+h = next(i for i, l in enumerate(lines) if l.startswith('#HostName'))
+lines[h] = lines[h][1:]
+rows = [r for r in csv.DictReader(io.StringIO("\n".join(lines[h:]))) if r.get('CountryShort') == cc]
+rows.sort(key=lambda r: -int(r.get('Score') or 0))
+n = 0; total = 0
+for r in rows:
+    try: cfg = base64.b64decode(r['OpenVPN_ConfigData_Base64']).decode(errors='ignore')
+    except Exception: continue
+    if 'proto tcp' not in cfg: continue
+    total += 1
+    rem = [l.split()[1] for l in cfg.splitlines() if l.startswith('remote ')]
+    if rem and rem[0] in excl: continue
+    if n >= lim: continue
+    n += 1
+    p = f"{out}/cand-{cc}-{n:02d}.ovpn"; open(p, 'w').write(cfg); os.chmod(p, 0o600)
+print(f"candidates_written={n} tcp_total={total} all_rows={len(rows)}")

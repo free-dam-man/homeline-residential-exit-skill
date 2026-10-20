@@ -1,0 +1,20 @@
+#!/bin/sh
+# usage: scan.sh CC  (env VPSIP, LIMIT) ; candidates in /scan/cand-CC-*.ovpn
+CC="$1"; LIMIT=${LIMIT:-5}; n=0
+for f in /scan/cand-${CC}-*.ovpn; do
+  [ -f "$f" ] || continue; n=$((n+1)); [ $n -gt $LIMIT ] && break
+  rm -f /tmp/o.log
+  openvpn --config "$f" --auth-user-pass /scan/auth.txt --daemon --log /tmp/o.log
+  ok=""
+  for i in $(seq 1 22); do grep -q "Initialization Sequence Completed" /tmp/o.log && ok=1 && break; grep -q "AUTH_FAILED" /tmp/o.log && break; sleep 1; done
+  if [ -n "$ok" ]; then
+    out=$(curl -s -m 12 https://api.ipify.org)
+    if [ -n "$out" ] && [ "$out" != "$VPSIP" ]; then
+      c=$(curl -s -m 10 "http://ip-api.com/line/$out?fields=countryCode")
+      if [ "$c" = "$CC" ]; then echo "WORKING $CC try=$n"; cp "$f" /scan/working-${CC}.ovpn; exit 0; fi
+      echo "WRONGCC $CC try=$n got=$c"
+    else echo "NOEXIT_OR_LEAK $CC try=$n"; fi
+  else echo "FAIL $CC try=$n"; fi
+  pkill openvpn 2>/dev/null; sleep 2
+done
+echo "NONE $CC tried=$n"; exit 1

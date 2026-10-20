@@ -1,0 +1,32 @@
+#!/bin/bash
+# 巡检骨架（示例，需按你 VPS 上的真实线路改 <...> 后再挂 cron/定时任务）：
+# 每条线路：经本机 SOCKS 查出口 IP -> 和 VPS 自身公网 IP 对比（相等=泄漏，立刻换节点）
+# -> 查归属国家/运营商 -> 写状态 JSON -> 连续失败计数，超过阈值才通知人。
+# 状态文件结构见 homeline-status.example.json。出口 IP 会变是正常现象，不要把「IP 变了」当故障。
+set -u
+STATUS_FILE="<PATH_TO>/homeline-status.json"
+FAIL_NOTIFY_THRESHOLD=3   # 与现有巡检一致：连续失败 >3 且自愈失败才通知
+
+check_line() {
+  local name="$1" country="$2" socks_port="$3" xray_port="$4" dir="$5"
+  local gate_user gate_pass exit_ip org vps_ip
+  gate_user=$(grep -E '^GATE_USER=' "$dir/.env" | cut -d= -f2-)
+  gate_pass=$(grep -E '^GATE_PASS=' "$dir/.env" | cut -d= -f2-)
+  vps_ip=$(curl -s -m 10 https://api.ipify.org || true)
+  exit_ip=$(curl -s -m 20 --socks5-hostname "127.0.0.1:${socks_port}" \
+    --proxy-user "${gate_user}:${gate_pass}" https://api.ipify.org || true)
+  if [ -z "${exit_ip}" ]; then
+    echo "[${country}] SOCKS no exit (count++ ; manager should rotate after its own FAIL_THRESHOLD)"
+    return 1
+  fi
+  if [ "${exit_ip}" = "${vps_ip}" ]; then
+    echo "[${country}] LEAK: exit == VPS IP, rotate immediately"
+    return 2
+  fi
+  org=$(curl -s -m 10 "http://ip-api.com/line/${exit_ip}?fields=countryCode,city,isp" || true)
+  echo "[${country}] ok exit=<redacted-in-logs> org=${org}"
+  # TODO（部署时补全）：把 exit/org/计数写进 $STATUS_FILE；国家和用户选的对不上时标 mismatch，不要偷偷改国家标签。
+}
+
+# check_line <NAME> <COUNTRY> <SOCKS_PORT> <XRAY_PORT> <LINE_DIR>
+# check_line <NAME> <COUNTRY> <SOCKS_PORT> <XRAY_PORT> "$HOME/vpngw-<NAME>"

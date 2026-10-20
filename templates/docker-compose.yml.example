@@ -1,0 +1,38 @@
+# 家宽线路栈模板：复制到 VPS 的 ~/vpngw-<NAME>/docker-compose.yml 后替换所有 <...> 占位符。
+# 一国一条栈：换国家只改 NAME / COUNTRIES / 端口，目录、容器名、服务名都跟着 NAME 变，别共用。
+# 网关和管理器的 Dockerfile/entrypoint/管理器程序不在本模板里：
+# 部署时由 AI 按 SKILL.md 第 3 节从安装脚本的对应段落生成，或直接跑整段安装脚本，待实测确认你手头脚本版本与本模板字段一致后再手工拆分。
+services:
+  gateway:
+    build: ./gateway
+    container_name: vpngw-<NAME>-gateway
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    ports:
+      # SOCKS 只绑本机回环：外网扫不到、连不上。改成 0.0.0.0 是安全事故，不许改。
+      - "127.0.0.1:<SOCKS_PORT>:1080"
+    volumes:
+      - ./ovpn:/vpn
+      - ./state:/state
+    environment:
+      # 字段名必须是 GATE_USER / GATE_PASS，与 .env、管理器、Xray 出站三处完全一致。
+      GATE_USER: ${GATE_USER:?GATE_USER missing in .env}
+      GATE_PASS: ${GATE_PASS:?GATE_PASS missing in .env}
+    restart: unless-stopped
+  manager:
+    build: ./manager
+    container_name: vpngw-<NAME>-manager
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./ovpn:/ovpn
+      - ./state:/state
+    environment:
+      - COUNTRIES=<COUNTRY_CODE>
+      - GATEWAY_NAME=vpngw-<NAME>-gateway
+      - GATE_USER=${GATE_USER:?GATE_USER missing in .env}
+      - GATE_PASS=${GATE_PASS:?GATE_PASS missing in .env}
+    restart: unless-stopped
