@@ -1,0 +1,23 @@
+#!/bin/bash
+# grant-access.sh — "lock handoff": the AGENT runs part A on its own machine, the OPERATOR runs part B on the VPS.
+# The private key never leaves the agent's machine; no password is ever asked for.
+#
+# Part A (agent machine): create a dedicated key, once per operator/VPS
+#   ssh-keygen -t ed25519 -N '' -C homeline-agent -f ~/.ssh/homeline_agent_ed25519
+#   PUB=$(cat ~/.ssh/homeline_agent_ed25519.pub)
+#   Then send the operator the one-liner below with <PUBKEY> replaced by "$PUB".
+#
+# Part B (operator, paste into the VPS terminal as the login user, usually root):
+#   mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && grep -qxF '<PUBKEY>' ~/.ssh/authorized_keys || echo '<PUBKEY>' >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys && echo "IP: $(curl -s4 -m 8 ifconfig.me || curl -s4 -m 8 api.ipify.org)  USER: $(whoami)"
+#
+# Part C (agent): ssh -i ~/.ssh/homeline_agent_ed25519 -o StrictHostKeyChecking=accept-new <USER>@<IP> 'bash -s' < templates/scan-vps.sh
+#
+# Revoke (operator, any time; given again at delivery):
+#   sed -i '/homeline-agent$/d' ~/.ssh/authorized_keys
+#
+# Helper: running this file on the agent machine prints the Part B one-liner for the current key.
+set -eu
+KEY=${HOMELINE_KEY:-$HOME/.ssh/homeline_agent_ed25519}
+[ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N '' -C homeline-agent -f "$KEY"
+PUB=$(cat "$KEY.pub")
+printf '%s\n' "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && grep -qxF '$PUB' ~/.ssh/authorized_keys || echo '$PUB' >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys && echo \"IP: \$(curl -s4 -m 8 ifconfig.me || curl -s4 -m 8 api.ipify.org)  USER: \$(whoami)\""
