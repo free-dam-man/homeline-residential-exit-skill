@@ -20,6 +20,19 @@ Treat the target VPS as an unknown machine. Nothing in this skill assumes a prov
    mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && grep -qxF '<PUBKEY>' ~/.ssh/authorized_keys || echo '<PUBKEY>' >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys && echo "IP: $(curl -s4 -m 8 ifconfig.me || curl -s4 -m 8 api.ipify.org)  USER: $(whoami)"
    ```
    Ask only: "把这条命令粘到你 VPS 的终端里执行，然后把输出的 IP 和用户名回我（用户名一般是 root）。" Then connect with `ssh -i ~/.ssh/homeline_agent_ed25519 -o StrictHostKeyChecking=accept-new <USER>@<IP>`. The private key stays on your machine — never print, send, upload or commit it. If the user is not root, all build steps use `sudo`; no sudo → hard stop. Never log into a server the operator did not hand over in this session.
+   **Fallback — operator cannot use a terminal/SSH.** Tell them: "没关系，打开你 VPS 商家的网页控制台（在我的远程浏览器里打开），你自己登录就行，密码、两步验证、验证码都你来输，我不看也不问。登进去之后我来操作。" Then YOU drive the provider's web console terminal in your cloud/remote browser: paste the key-handoff command above, read the printed IP/user from the screen, and continue over SSH as normal. If SSH from outside is blocked (port filtered, no public IP), run every step (scan, build, verify) inside the web console instead. Never ask for, type, or store the operator's account password; if a login/2FA/captcha appears again, hand the browser back to the operator.
+   Web consoles often mangle long or fast pastes (dropped characters, auto-indent, wrapped quotes): paste short lines one at a time, or write files with a heredoc (`cat > /tmp/x.sh <<'EOF'` … `EOF`) and then run them; always echo back / `sha256sum` what you pasted before executing it. The key line is long — paste it as `K='<PUBKEY>'` first, then the command using `"$K"`.
+   Where the web console usually is (examples only; menus change, check the provider's docs):
+
+   | Provider (example) | Web console |
+   |---|---|
+   | Vultr | Instance page → "View Console" (noVNC) |
+   | Oracle Cloud | Cloud Shell, or instance → Console connection (serial console) |
+   | AWS EC2 | Instance → Connect → EC2 Instance Connect / Session Manager |
+   | Google Cloud | VM instances → "SSH" (SSH-in-browser) |
+   | DigitalOcean | Droplet → Access → "Droplet Console" / Recovery Console |
+   | Linode (Akamai) | Linode → "Launch LISH Console" (Weblish / Glish) |
+
 2. **Run the read-only scan**: `bash templates/scan-vps.sh` (copy it over, or `ssh <target> 'bash -s' < templates/scan-vps.sh`). It installs nothing and changes nothing. Read every section.
 3. **Show ONE compact plan with defaults** (template below), built from the decision table. The operator may change any item by number, or just say 继续 / OK. **No objection = proceed.**
 4. **Build** (Sections 3–4), then deliver (Section 7).
