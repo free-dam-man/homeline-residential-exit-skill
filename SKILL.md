@@ -7,68 +7,64 @@ description: "Use when someone wants to build their own residential-exit (家宽
 
 Build a personal residential-exit node: on the operator's own VPS, a gateway container runs an OpenVPN client to a VPN Gate volunteer node and exposes an authenticated SOCKS5 bound to `127.0.0.1` only; a scan step picks a working node by country, the gateway's own minute watchdog restarts a stalled tunnel (kill switch: no VPS-IP leak), and an optional patrol swaps dead nodes; a standalone Xray (not a panel's Xray) serves VLESS+Reality to clients and forwards everything out through that SOCKS. Exit is the residential node's IP, not the VPS.
 
-Goal state: the operator ends with (1) one verified `vless://` link per accepted country line, (2) a scannable QR code image of that link, (3) a measured exit country/ISP that matches what the operator picked, or an explicit operator decision to accept a mismatch, (4) a working patrol/self-heal loop, and (5) at least one real client that connected end-to-end. If any operator input below is missing, stop at the gate and ask. Do not invent VPS logins, passwords, UUIDs, keys, exit countries, or results.
+Goal state: the operator ends with (1) one verified `vless://` link per accepted country line, (2) a scannable QR code image of that link, (3) a measured exit country/ISP that matches what the operator picked, or an explicit operator decision to accept a mismatch, (4) a working patrol/self-heal loop, and (5) at least one real client that connected end-to-end. Only SSH access is asked up front; everything else comes from the Phase 0 scan + default plan. Do not invent VPS logins, passwords, UUIDs, keys, exit countries, or results.
 
 Honesty baseline: this package was distilled from a working multi-country deployment (gateway containers per country, standalone `xray-home-<name>` systemd services, an hourly-style patrol writing a status JSON). Details that were not re-verified on a blank VPS in this pass are marked **待实测确认** in this file. Never present a 待实测确认 item as proven.
 
-## 0. Pre-flight gate (STOP and ask if anything is missing)
+## 0. Phase 0 — scan & plan (mandatory, before ANY change)
 
-Collect every item before touching the VPS. If an item is missing, output the missing list and stop. Never log into a server the operator did not explicitly hand over in this session.
+Treat the target VPS as an unknown machine. Nothing in this skill assumes a provider, distro, port layout or existing software. Flow (the operator answers at most 1–2 times):
 
-| # | Operator input | Accepted forms | If missing |
-|---|---|---|---|
-| 1 | VPS login method | SSH target + key/password supplied in session, or "I am already logged in, guide me" | STOP and ask |
-| 2 | VPS facts | OS/arch (`uname -a`), has Docker or may install it, `/dev/net/tun` availability if known | Ask operator to run the read-only probe in Step 1/7 |
-| 3 | Target country (first line) | One of JP / KR / GB / US, or another VPN Gate country code the operator names | STOP and ask (Step 2/7) |
-| 4 | Line name + ports | Line name (lowercase, e.g. `jp`), one public Xray TCP port, one loopback SOCKS port; all unused on that VPS | Propose, confirm, verify free in Step 1/7 |
-| 5 | Client target | Shadowrocket / Clash / sing-box / v2rayN (pick at least one for the first test) | Ask; default suggestion is Shadowrocket only if operator confirms |
-| 6 | Existing-panel declaration | "This VPS has / has no 3x-ui, x-ui or other panel" | Ask; if it has one, the no-touch rule in Section 1 applies |
+1. **Ask once for access** (the only mandatory question): "把 VPS 的 SSH 登录方式发我（地址 + 密钥或密码，只在本次会话用）。" Never log into a server the operator did not hand over in this session.
+2. **Run the read-only scan**: `bash templates/scan-vps.sh` (copy it over, or `ssh <target> 'bash -s' < templates/scan-vps.sh`). It installs nothing and changes nothing. Read every section.
+3. **Show ONE compact plan with defaults** (template below), built from the decision table. The operator may change any item by number, or just say 继续 / OK. **No objection = proceed.**
+4. **Build** (Sections 3–4), then deliver (Section 7).
 
-Gate rule: after listing what is present and missing, wait. Work allowed before the gate passes is read-only preparation only: reading this skill, probing the VPS (Section 2 read-only commands), and explaining trade-offs. Never install, write configs, open firewall ports, or start containers before the gate passes.
+Hard stops (do not proceed even if the operator says continue; explain plainly): `tun: MISSING` or not openable as root; any step that would modify/stop/restart/delete an existing service, container, panel, config or firewall rule; anything destructive (disk wipe, reinstall, deleting user data); arch unsupported; no privilege (not root, no sudo).
 
-Route-honesty rule (say this in substance at the start): "这条路线必须有一台你自己的 VPS，和 CF 那个不要服务器的包不一样。出口是住宅志愿者节点的 IP，会掉、会换 IP，靠巡检自愈续命；我能保证的只有：部署完实测出口给你看，国家对不对、像不像住宅，你点头才算数。"
+### Decision table (scan result → plan item)
 
-## 0A. Beginner wizard (default mode for non-technical operators)
+| Scan finding | Plan default |
+|---|---|
+| `tun: present+openable` | Route A (Section 3). `tun: MISSING` → HARD STOP: "这台机器不支持 TUN，网关跑不起来；可以问商家开 TUN，或换一台 KVM 机器。" |
+| `virt: openvz` / `lxc` | Warn: TUN/iptables inside Docker often fail there; continue only if TUN is openable, and expect the gateway's iptables to be the first thing to break. |
+| `arch: x86_64` / `aarch64` | Xray asset from `xray_asset`; gateway image builds from Alpine source on both (no prebuilt image needed). Other arch → HARD STOP. |
+| `memory_verdict: LOW` (<1 GB, little swap) | Auto-add a 1 GB swap file (`/swapfile-homeline`, new file only, never touch an existing swap); run scans one at a time. |
+| `disk_root free_mb` < 1500 | Warn; Docker + images need ~300–600 MB. |
+| `docker_version: absent` | Auto-install Docker via the official script (download, read, run). Present Docker is reused as is — never upgraded/restarted. |
+| `privilege: limited` | HARD STOP until root/sudo is provided. |
+| `listening_ports` | Pick `XRAY_PORT`s from free high ports (default range 30000–40000, first free per line) and `SOCKS_PORT`s on loopback (default 12081+, first free). Every port seen in the scan is "taken", whatever it is. |
+| `existing_proxies_panels` detected | No-touch rule (Section 1). Report what was found; new line uses only new names/ports/dirs. |
+| `firewall` ufw/firewalld/nft active | Add ONE allow rule per new `XRAY_PORT` with the same tool; never edit/delete others. Remind: cloud security group is invisible from inside — operator must open it there too (only item that may need their action). |
+| `vpngate_api: http!=200` | HARD STOP for building: node list unreachable from this VPS; report it. |
+| `outbound_udp` failed | Use `fetch.py --tcp-only`. |
+| `vps_ip_info hosting=true` | Normal (the VPS is a datacenter); it is the value the leak check compares against. |
 
-If the operator is non-technical, do NOT hand them Section 3 to execute. Run this dialogue instead: one question at a time, plain language, wait for the answer, validate format, then YOU do the work over SSH. The operator should only need to: hand over VPS access, pick a country, and scan a QR code at the end. Never ask the operator to "edit compose" or "run systemctl".
-
-Mandatory facts to state in plain Chinese at the start:
-
-- "服务器：必须要有一台你自己的 VPS，没有就先停下，要么去买一台，要么改用 CF 那个不要服务器的包。CF 包的出口是机房 IP，这个包的出口是住宅 IP，这是两者最大的区别。"
-- "国家：你选哪个国家，我就按哪个国家找住宅节点；但最后以实测出口为准，对不上我不会偷偷换个国家糊弄你，会报给你让你选：接受、换个节点再测、还是换国家。"
-- "稳定性：住宅节点是志愿者开的，会掉线、会换 IP，这很正常。系统会自己巡检、自己换节点；但某个国家可能一段时间一个可用节点都没有，到时我如实告诉你，不编假线路。"
-- "费用：除了 VPS 本身，没有别的必须花的钱。"
-
-Before W1, you MUST send the operator ONE heads-up card first, as a single message, before asking anything else. Use this card verbatim (fill nothing in):
+### Plan template (send as one message)
 
 ```text
-先花30秒看完, 然后我们一步一步来:
-一共7步, 每步我只问一句, 你回一句就行, 部署的活我来做, 不用你动手。
-必需: 一台你自己的 VPS(能装 Docker 的 Linux), 这是和 CF 那个包最大的区别, 没服务器这条路走不了。
-你要准备: VPS 的登录方式, 想一个要的国家(日/韩/英/美等), 最后用手机客户端扫码。
-全程你只做三件事: 1) 把服务器交给我登录, 2) 选国家, 3) 最后扫码验收。
-预计耗时: 第一次装通常十几分钟起, 主要看服务器网速和那个国家当下有没有可用住宅节点, 不保证固定时间。
-说明: 出口是住宅节点的 IP, 会掉会变, 系统会自动巡检换节点; 最后以实测出口国家为准, 你点头才算定。
+扫描完了（只读，没改任何东西）。机器：<distro> <version> / <arch> / 内存 <MB>MB / TUN 可用 / 已有服务：<list or 无>。
+默认方案，回数字改某项，没意见回「继续」就开工：
+1) 路线：A（单网关容器 + 独立 Xray，已实测）
+2) 国家：KR + US（可改，例如 JP、GB；JP 默认排除非家宽的 SoftEther 节点）
+3) 端口：KR <port>，US <port>（都是扫描确认空闲的）
+4) 内存：<已够 / 自动加 1GB swap>
+5) Docker：<已有，直接用 / 自动安装>
+6) 定时巡检换节点：关（网关每分钟自检照常开着）
+7) 客户端：小火箭（链接通用，其他客户端也能导入）
+原有的 <已有服务> 一律不动；云厂商安全组需要你放行上面的端口。
 ```
 
-Progress prefix rule (mandatory): every wizard question must start with "第X/7步". Mapping is fixed: W1 = 第1/7步（服务器）, W2 = 第2/7步（选国家）, W3 = 第3/7步（线路名与端口）, W4 = 第4/7步（客户端）, then deployment is 第5/7步（部署）, verification is 第6/7步（实测出口）, patrol handover is 第7/7步（巡检与交付）. Follow-up questions inside the same W item keep the same prefix. Secrets (`GATE_USER`/`GATE_PASS`, UUID, Reality keys) are NOT wizard steps and get no number: they are generated on the VPS, mentioned only as a note inside 第5/7步.
-
-Wizard steps (ask exactly one at a time; scripts in Chinese you can copy):
-
-- W1 Server. Ask: "第1/7步（服务器）: 你有自己的 VPS 吗?有的话把登录方式发我(地址和密钥/密码只在这次会话里用);还没有的话回 没有,我先跟你说清买什么样的、大概多少钱,你决定了我们再继续。" Wait. Validate: you can actually open an SSH session, or the operator confirms they are logged in and will paste command outputs back. Never ask for credentials the operator did not offer, never store them in this package or any file that ships.
-- W2 Country. Run Section 0B. Its question carries the 第2/7步（选国家） prefix. One country for the first line; more countries later by repeating the whole build per country (Section 5).
-- W3 Line name + ports. Auto-suggest, do not make them invent: "第3/7步（线路名与端口）: 我建议这条线叫 <国家小写>,对外端口用 <PORT>,可以吗?想改回我一个名字或端口。" Validate: name is lowercase letters/digits, port is 1-65535 and (once you can check) not already listening on the VPS; on conflict pick another port and re-confirm. Never reuse an occupied port, and never pick a port an existing panel is known to use without checking.
-- W4 Client. Ask: "第4/7步（客户端）: 你最后用什么上网?小火箭 Shadowrocket / Clash / sing-box / v2rayN,回名字就行,不确定就回 小火箭。" This only chooses the first test format; the `vless://` link itself is the same.
-- Then execute Sections 2-4 yourself (第5/7步部署）, Section 4 verification （第6/7步实测出口）, and Section 6 patrol + Section 7 delivery （第7/7步）. At the end deliver only: the verified link, its QR image, and the measured exit country/city/ISP per line. If any step fails twice, stop and report the exact error in plain Chinese instead of improvising fixes on live resources.
+Route-honesty note (put one line of it in the plan or the final report): 出口是住宅志愿者节点的 IP，会掉、会换 IP；最后以实测出口为准，国家不对或不是家宽会如实说。
 
 ## 0B. Country choice: the operator decides (mandatory)
 
 Honesty rule (say this verbatim in substance): "你选国家，我按国家找节点；找到后我实测出口 IP 的国家、城市和运营商报给你，对得上你点头才算定，对不上你选：接受这个实际出口、换下一个节点再测、还是换个国家。我不会把别的国家的出口贴上你选的标签交付。"
 
-- R1 Ask (first line: exactly one country; multi-country is built later line by line): "第2/7步（选国家）: 你想要哪个国家的住宅出口?常见：日本 JP、韩国 KR、英国 GB、美国 US。也可以回你想的其它国家代码，我先查有没有节点再答复你。"
+- R1 Countries come from plan item 2 (default KR + US; the operator may change it). Each country is an independent line.
 - R2 Availability check: after the operator picks, check whether the node source currently lists any TCP-capable nodes for that country (`fetch.py` output in Section 3 step 4). If none: say so plainly — "这个国家现在一个可用节点都没找到" — and offer: wait/retry later, or pick another country. Never silently substitute another country's nodes.
 - R3 Measure, do not assume: a node's claimed country is a lead, not proof. After the line is up, measure the real exit (Section 4, V1-V3) and record requested country vs measured country/city/ISP per attempt.
-- R4 Operator decides, loop: report "第6/7步（实测出口）: 你选的是 X，实测出口是 Y（城市 Z，运营商 W)。1) 就用这个 2) 换下一个节点再测 3) 换个国家。回数字。" Choosing 2 = rescan excluding the current node (Section 3 step 4, `fetch.py ... <LINE_DIR>/ovpn/client.ovpn`), swap `client.ovpn`, restart the gateway, re-measure; choosing 3 returns to R1. Never end the build on an unaccepted country mismatch.
+- R4 Mismatch only: if the measured country differs, or the exit is datacenter/SoftEther, report "你选的是 X，实测出口是 Y（城市 Z，运营商 W)。1) 就用这个 2) 换下一个节点再测 3) 换个国家" and wait. A matching, non-datacenter exit needs no question. Choosing 2 = rescan excluding the current node (Section 3 step 4, `fetch.py ... <LINE_DIR>/ovpn/client.ovpn`), swap `client.ovpn`, restart the gateway, re-measure; choosing 3 returns to R1. Never end the build on an unaccepted country mismatch.
 - R5 Label honestly: the delivered link's label/remark must carry the MEASURED country (e.g. `Home-<MEASURED_CC>`), not only the requested one. Record in the Final Delivery Checklist: requested country, measured country/city/ISP, exit IP at delivery time (with a note that it will change), verification method, and date.
 
 ## 1. No-touch rule for existing panels (hard rule)
@@ -77,7 +73,7 @@ If the VPS already runs 3x-ui, x-ui, or any panel: this build must not modify, r
 
 ## 2. Blank-VPS prerequisites (verify read-only first)
 
-Run these read-only probes first and record the answers; do not install anything until Section 3:
+Covered by `templates/scan-vps.sh` (Phase 0). Minimal manual equivalent, read-only:
 
 ```bash
 uname -a; cat /etc/os-release | head -3; id; sudo -n true 2>/dev/null && echo sudo-ok || echo sudo-needs-password
@@ -136,7 +132,7 @@ The previous stack was fully removed and KR/JP/US were rebuilt on the same 512 M
 
 ## 2A. Route choice: A (tested main path, default) vs S (experimental)
 
-Two deployment routes reach the same client outcome (one verified `vless://` link + QR per accepted country). Pick at the gate, record the choice, and do not mix steps between routes mid-build.
+Two deployment routes reach the same client outcome (one verified `vless://` link + QR per accepted country). Chosen in the Phase 0 plan (default A), record the choice, and do not mix steps between routes mid-build.
 
 - **Route S — simplified (EXPERIMENTAL; did not pass exit traffic in its only field test — use only if the operator explicitly wants to try it).** The gateway + node-manager + local SOCKS layers are replaced by ONE upstream runtime: AimiliVPN (OpenMili/aimili-vpngate; see `templates/SOURCES.md` for the full audit — ~2k stars and actively pushed as of 2026-10-18, GPL-family license file, generated panel credentials, leak-guard and fixed-country mode in its docs). You still run THIS skill's own standalone Xray in front of it (Section 3S step 4), because AimiliVPN by itself only offers a local proxy, not a client-facing VLESS+Reality link. What disappears vs Route A: hand-writing the gateway/manager, generating `GATE_USER`/`GATE_PASS`, and babysitting node rotation by hand — the upstream panel does node fetching, testing, switching and health-driven drift. What does NOT disappear: needing a VPS with TUN/root, picking and measuring the country (Section 0B/4), and真机 verification. Route S in this package was field-tested once on 2026-10-18 (Section 2B): it came up but did NOT pass exit traffic on that host, so it remains **待实测确认 / not yet proven**; the first real deployment must be treated as the Route S field test and its results written back into the delivery checklist.
 - **Route A — self-built (Section 3, the tested main path).** One v2 gateway container per line (OpenVPN + microsocks + kill switch + minute watchdog), node picked by `scan.sh`, plus standalone Xray. No manager container, no docker.sock. More pieces, more control (per-country stacks are proven in the source deployment), and the fallback when: Route S fails its field test, the operator needs several countries at once with independent stacks today, or upstream changes its terms/license in a way the operator rejects.
@@ -153,7 +149,7 @@ Route S safety conditions (all mandatory, they are why S is allowed at all):
 
 ## 3S. Route S deployment (simplified; replaces Section 3 steps 3-5 for the gateway half)
 
-Execute only if Route S was chosen at the gate. Steps 1-2 of Section 3 (names/ports, prerequisites) still apply, with `<SOCKS_PORT>` = the AimiliVPN local proxy port and no `GATE_USER`/`GATE_PASS` at all on this route.
+Execute only if the operator explicitly switched plan item 1 to Route S. Steps 1-2 of Section 3 (names/ports, prerequisites) still apply, with `<SOCKS_PORT>` = the AimiliVPN local proxy port and no `GATE_USER`/`GATE_PASS` at all on this route.
 
 1. Clone the pinned upstream checkout onto the VPS (outside any existing panel directory), record commit hash + version file contents in your notes (not in this package). Build via its Docker path using `templates/docker-compose.aimili.example.yml` as your starting file (host network, NET_ADMIN/NET_RAW, TUN device, panel bound to localhost, proxy bound to localhost). If upstream's current compose/Dockerfile disagrees with the template, upstream-at-your-pin wins and you note the diff — the template is a checklist, not gospel.
 2. First start: retrieve the generated panel address/path/credentials from the location upstream documents for your deployment mode (Docker: its data volume's UI auth file; source install: the installer's printed output). Hand them to the operator once, in-session, and have them save them. Confirm the panel loads over your SSH tunnel / restricted path before continuing.
@@ -162,13 +158,13 @@ Execute only if Route S was chosen at the gate. Steps 1-2 of Section 3 (names/po
 5. Continue at Section 4 (verification) and Section 6 (patrol). For patrol on Route S: the upstream's own health/drift is Layer 1; you must still arm the external checker (Layer 2) because only it knows the operator's accepted country and can scream when the exit silently becomes another country or a datacenter. Exit-country-changed is a first-class alarm on this route, not a curiosity.
 
 
-## 3. Deploy one country line (第5/7步) — main path: single v2 gateway + scan
+## 3. Deploy one country line — main path: single v2 gateway + scan
 
 This is the path that was actually field-tested end-to-end (2026-10-18 and a clean re-run on 2026-10-21 from this public repo only). There is NO manager container: node choice = `fetch_candidates.py` + `scan.sh`; tunnel health = the gateway's built-in minute check; node swapping = optional `heal.sh` (Section 6). Route S users: execute Section 3S instead of steps 3-5, then rejoin at step 6.
 
 Placeholders: `<NAME>` (lowercase line name, e.g. `kr`), `<CC>` (uppercase country, e.g. `KR`), `<BASE>` (work dir, e.g. `/opt/homeline`), `<LINE_DIR>` = `<BASE>/<NAME>`, `<SOCKS_PORT>` (loopback), `<XRAY_PORT>` (public), `<VPS_IP>`, `<SNI_HOST>` (e.g. `www.apple.com`). Run as root (or prefix `sudo`). Each step reports before the next starts.
 
-1. **Names/ports free.** `ss -lntup | grep -E ':<XRAY_PORT>|:<SOCKS_PORT>' || echo free`; `docker ps -a --format '{{.Names}}' | grep vpngw-<NAME>` must be empty; `systemctl list-unit-files | grep xray-home-<NAME>` must be empty. Never pick ports an existing panel uses (3x-ui commonly: 443, 2053, 2096, 54321, 62789 and its own API port; check, do not assume).
+1. **Names/ports free.** `ss -lntup | grep -E ':<XRAY_PORT>|:<SOCKS_PORT>' || echo free`; `docker ps -a --format '{{.Names}}' | grep vpngw-<NAME>` must be empty; `systemctl list-unit-files | grep xray-home-<NAME>` must be empty. Use only ports the Phase 0 scan showed free (generic example: panels such as 3x-ui often hold 443, 2096, 54321, 62789 — never assume, always use the scan).
 2. **Prerequisites.** `apt-get install -y curl unzip openssl iptables python3` ; Docker if absent (`curl -fsSL https://get.docker.com -o get-docker.sh`, read it, then `sh get-docker.sh`). On ≤1 GB RAM add swap first (`fallocate -l 1G /swapfile-homeline && chmod 600 /swapfile-homeline && mkswap /swapfile-homeline && swapon /swapfile-homeline` + fstab line).
 3. **Gateway image (once per VPS).**
    ```bash
@@ -235,7 +231,7 @@ Build it from the generated values, store it `600` on the VPS (known path: the X
 
 Repeat Sections 2-4 per country with a fresh `<NAME>`, fresh ports, fresh `.env` credentials, fresh UUID/Reality keys, and its own containers/unit. Never share a SOCKS port, Xray port, directory, or credential set between lines: the known deployment runs each country as an independent stack precisely so one country's bad node pool cannot take down another. After each new line, re-run V1-V4 for that line and extend the patrol config (Section 6) before calling it delivered. Note the known patrol scope honestly: in the source deployment only the primary lines were in the heal scope and extra lines were observe-only — replicate that distinction deliberately (heal vs observe-only per line) and write down which is which, rather than assuming every line self-heals.
 
-## 6. Patrol and self-healing (第7/7步）
+## 6. Patrol and self-healing
 
 Two layers exist in the known deployment; keep both, they catch different things:
 
@@ -257,7 +253,7 @@ Deliver, and nothing beyond this list needs the operator's attention:
 2. The QR PNG per link, with V5's decode result stated.
 3. A short measured-exit report per line: requested country, measured country/city/ISP, "exit IP will change" note, and which lines are heal-scope vs observe-only.
 4. Where things live on the VPS: line directory, unit name, status file path, and the two commands a human would need (`systemctl status xray-home-<NAME>`, `docker logs --tail 50 vpngw-<NAME>-gateway`).
-5. The Final Delivery Checklist, filled: gate inputs present (no secret values), country requested vs measured per line, V1-V6 results with method (server probe / phone client), Xray version installed, patrol armed yes/no, no-touch rule respected (existing panel untouched) yes/no, date.
+5. The Final Delivery Checklist, filled: Phase 0 scan summary + accepted plan (no secret values), country requested vs measured per line, V1-V6 results with method (server probe / phone client), Xray version installed, patrol armed yes/no, no-touch rule respected (existing panel untouched) yes/no, date.
 
 Do not deliver: raw `.env` contents, Reality private keys, SOCKS passwords, SSH credentials, or screenshots containing any of them.
 
