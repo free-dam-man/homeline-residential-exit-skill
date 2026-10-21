@@ -1,6 +1,6 @@
 # 家宽（住宅出口）节点 Skill
 
-把一套「VPS + VPN Gate 住宅节点 + 独立 Xray」的家宽出口经验做成 AI Skill。2026-10-18 起新增**简化路线 S**：网关/选节点/本地 SOCKS 这三层运行时引用已核查的上游 AimiliVPN（OpenMili/aimili-vpngate，见 `templates/SOURCES.md` 的逐项审计），小白默认走 S；自研 vpngw 双容器栈保留为路线 A（多国并行/需要全控制时用）。两条路线最后都回到同一套实测验收，不许跳。2026-10-18 真机首测（512 MB Debian 13，详见 SKILL.md 第 2B 节）：路线 S 面板/节点拉取正常但代理出口没跑通，暂不算 proven；路线 A 最小网关跑通一条 KR 线（SK Broadband、非机房标记），独立 Xray + 内外两处真实客户端内核验证出口一致，就差用户手机扫码真机测速这最后一步。下载了这个 Skill 的 AI，应能带着小白在一台**自己的 VPS** 上从零部署出一条指定国家的住宅出口线路，最后交付一条可直接导入客户端的 `vless://` 链接和一张可扫的二维码。
+把一套「VPS + VPN Gate 住宅节点 + 独立 Xray」的家宽出口经验做成 AI Skill。**主路线是 A**：每条线一个 v2 网关容器（OpenVPN + microsocks + kill switch + 每分钟流量自检），用扫描脚本挑能用的节点，再加一个独立 Xray。不需要管理器容器，也不挂 docker.sock。路线 S（引用上游 AimiliVPN）只是实验选项，首测没跑通出口。两条路线最后都回到同一套实测验收，不许跳。2026-10-18 真机首测（512 MB Debian 13，详见 SKILL.md 第 2B 节）：路线 S 面板/节点拉取正常但代理出口没跑通，暂不算 proven；路线 A 最小网关跑通一条 KR 线（SK Broadband、非机房标记），独立 Xray + 内外两处真实客户端内核验证出口一致，就差用户手机扫码真机测速这最后一步。下载了这个 Skill 的 AI，应能带着小白在一台**自己的 VPS** 上从零部署出一条指定国家的住宅出口线路，最后交付一条可直接导入客户端的 `vless://` 链接和一张可扫的二维码。
 
 ## 这是啥
 
@@ -15,7 +15,7 @@
   -> 互联网（出口 IP 是那个住宅节点的 IP，不是 VPS 的机房 IP）
 ```
 
-旁边还有一个「管理器」容器：从 VPN Gate 的公开节点列表里按国家挑节点、写 OpenVPN 配置、盯着出口健不健康，坏了就自动换下一个节点。
+挑节点：`fetch_candidates.py` 从 VPN Gate 公开列表按国家拉候选（TCP 优先、再按延迟/速度排，默认排除 SoftEther 网段），`scan.sh` 在临时容器里逐个试，失败信号立刻跳过。网关自己每分钟测一次真实流量，断流就重启；节点彻底死了可以手动重扫，或者选装 `heal.sh` 定时换节点（可选，不装也行）。
 
 ## 和 CF 节点的区别
 
@@ -54,10 +54,13 @@
 | 文件 | 作用 |
 |---|---|
 | `SKILL.md` | Skill 本体：门禁、向导、部署、选国家、验证、巡检自愈、排障、交付清单 |
-| `templates/docker-compose.yml.example` | 网关 + 管理器双容器模板（占位符，含 GATE_USER/GATE_PASS 字段名坑提醒） |
+| `templates/docker-compose.yml.example` | 可选：单网关容器的 compose 写法（等价于 SKILL.md 第 3 节的 docker run，无管理器、无 docker.sock） |
 | `templates/.env.example` | 每条线路的 `.env` 占位符模板（只放键名和生成方法，不放真值） |
 | `templates/xray-config.json.example` | 独立 Xray 入站 Reality -> 本机 SOCKS 的配置模板 |
-| `templates/check-lines.sh.example` | 巡检脚本骨架：查 SOCKS 出口、计数、写状态 JSON |
+| `templates/check-lines.sh.example` | 巡检脚本骨架（可选）：查 SOCKS 出口、计数、写状态 JSON |
+| `templates/gateway-v2.Dockerfile.example` / `gateway-v2-entrypoint.sh.example` | 主路线网关镜像：kill switch + 每分钟流量自检（pgrep 判断 OpenVPN 存活） |
+| `templates/fetch_candidates.py.example` / `scan.sh.example` | 拉候选节点 + 扫描挑节点 |
+| `templates/heal.sh.example` / `homeline-heal.timer.example` | 可选：定时巡检换节点（参数化路径，间隔自定） |
 | `templates/homeline-status.example.json` | 巡检状态文件结构示例（字段结构与现有巡检一致，值全是占位符） |
 | `templates/SOURCES.md` | 2026-10-18 上游候选审计表：维护/许可证/采纳或否决理由（运行时引用，不搬代码） |
 | `templates/docker-compose.aimili.example.yml` | 路线 S 的 AimiliVPN 容器模板（占位符，本包原创模板，不含上游代码） |
@@ -74,9 +77,13 @@
 
 ## 发布方式
 
-本包通过 zip 私下分享，不公开。包里只放占位符版本，不含任何真实账号、IP、域名、UUID、令牌或订阅。
+本包已在 GitHub 公开发布（MIT）。仓库里只放占位符，不含任何真实账号、IP、域名、UUID、令牌或订阅；提 Issue 也请不要贴这些。
 
 ## Round 2 additions (2026-10-21)
 
 - `templates/gateway-v2-entrypoint.sh.example`, `gateway-v2.Dockerfile.example`: Route A gateway with in-container kill switch (fixes a measured leak).
-- `templates/heal.sh.example`, `fetch_candidates.py.example`, `scan.sh.example`, `homeline-heal.timer.example`: per-line patrol + self-heal, default every 12 hours (adjustable), swaps only the node so the link never changes. See SKILL.md 2C and 6.
+- `templates/heal.sh.example`, `fetch_candidates.py.example`, `scan.sh.example`, `homeline-heal.timer.example`: per-line patrol + self-heal (OPTIONAL; interval is the operator's choice, or skip it and rely on the gateway's minute check), swaps only the node so the link never changes. See SKILL.md 2C and 6.
+
+## Round 3 fixes (2026-10-21, clean re-run)
+
+See SKILL.md 2D and `docs/TECH-SUMMARY.md`.
