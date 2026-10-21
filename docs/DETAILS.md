@@ -89,3 +89,7 @@
 ## Round 3 fixes (2026-10-21, clean re-run)
 
 See SKILL.md 2D and `docs/TECH-SUMMARY.md`.
+
+## Round 4 lessons (2026-10-21, independent test on a ~1 GB cloud VM)
+
+容器统一 `--dns 8.8.8.8`（防云元数据 DNS 黑洞）、Xray 模板端口改为数字、外部客户端验证可换独立机器、VPC 云防火墙要单独放行、云上 authorized_keys 可能被重置需重新交钥匙。详见 SKILL.md 2E 节和 `docs/TECH-SUMMARY.md`。
