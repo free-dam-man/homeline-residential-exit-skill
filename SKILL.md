@@ -27,6 +27,8 @@ Treat the target VPS as an unknown machine. Nothing in this skill assumes a prov
    | Provider (example) | Web console |
    |---|---|
    | Vultr | Instance page → "View Console" (noVNC) |
+   Browser console pitfalls: if the console says the account lacks permission (e.g. no Compute access), the browser is signed into the wrong cloud account — ask the operator to switch accounts; SSH-in-browser consoles (GCP-style) work well for the key handoff.
+
    | Oracle Cloud | Cloud Shell, or instance → Console connection (serial console) |
    | AWS EC2 | Instance → Connect → EC2 Instance Connect / Session Manager |
    | Google Cloud | VM instances → "SSH" (SSH-in-browser) |
@@ -52,6 +54,8 @@ Hard stops (do not proceed even if the operator says continue; explain plainly):
 | `privilege: limited` | HARD STOP until root/sudo is provided. |
 | `listening_ports` | Pick `XRAY_PORT`s from free high ports (default range 30000–40000, first free per line) and `SOCKS_PORT`s on loopback (default 12081+, first free). Every port seen in the scan is "taken", whatever it is. |
 | `existing_proxies_panels` detected | No-touch rule (Section 1). Report what was found; new line uses only new names/ports/dirs. |
+| `resolver_verdict: LOCAL/METADATA` | Normal on clouds; plan keeps `--dns 8.8.8.8` on every container (already the default). |
+| Provider looks like GCP / other VPC cloud (`vps_ip_info` org) | Besides the OS firewall, an ingress rule in the VPC firewall is needed (add-only, target only the new ports). Keys added by hand can be removed by the guest agent / OS Login: if SSH suddenly fails with `Permission denied (publickey)`, redo the key handoff instead of debugging. |
 | `firewall` ufw/firewalld/nft active | Add ONE allow rule per new `XRAY_PORT` with the same tool; never edit/delete others. Remind: cloud security group is invisible from inside — operator must open it there too (only item that may need their action). |
 | `vpngate_api: http!=200` | HARD STOP for building: node list unreachable from this VPS; report it. |
 | `outbound_udp` failed | Use `fetch.py --tcp-only`. |
@@ -147,6 +151,14 @@ Caveats stated honestly: the JP exit is registered to "SoftEther" (the VPN Gate 
 
 The previous stack was fully removed and KR/JP/US were rebuilt on the same 512 MB VPS following only this repository, as a newcomer would. Result: all three lines delivered exits matching the requested country (KR: Korea Telecom, hosting=false; JP: SoftEther AS36599 → not 家宽; US: a regional US ISP, hosting=false, residential status unconfirmed), each confirmed by a real Xray client over the public internet (Cloudflare trace `loc` = requested country). Kill switch re-verified (killed OpenVPN → SOCKS returned nothing). Gaps found in that run and fixed in this version: missing manager source (main path is now the single-gateway flow), undocumented `auth.txt`, no `docker run` command, pidfile watchdog bug (now `pgrep`), Xray 26.x key labels, QR verify needing OpenCV, SoftEther nodes ranked first for JP, hard-coded paths in heal.sh, a docker.sock mount contradicting 2A, patrol wrongly mandatory. Phone (V4) test of these links: 未测.
 
+## 2E. Field test record (independent operator, 2026-10-21)
+
+| Host | Existing services | Lines | Exit (measured) | V1–V6 | Phone (V4 on handset) |
+|---|---|---|---|---|---|
+| GCP e2-micro, Debian 12, ~969 MB RAM, no Docker at start | an existing Xray (80/443) and shadowsocks-libev — untouched | KR, US | KR: Korea Telecom, residential; US: Verizon/Frontier-class consumer ISP, residential | pass (V4 by an independent machine's real Xray client) | 未测 |
+
+Lessons from that run (now built in): auto 1 GB swap + Docker official script worked on <1 GB RAM; containers inherited the cloud metadata resolver (`169.254.169.254`) and DNS died once the tunnel took the default route, so the scan misjudged good nodes as `NOEXIT_OR_LEAK` → all containers now start with `--dns 8.8.8.8`; quoted ports in the Xray template failed on 26.x → template ports are unquoted numbers; a VPC firewall ingress rule was required in addition to the OS firewall; the agent's own machine could not run a client (outbound proxy returned HTTP 407) → verification used another independent machine.
+
 ## 2A. Route choice: A (tested main path, default) vs S (experimental)
 
 Two deployment routes reach the same client outcome (one verified `vless://` link + QR per accepted country). Chosen in the Phase 0 plan (default A), record the choice, and do not mix steps between routes mid-build.
@@ -196,7 +208,7 @@ Placeholders: `<NAME>` (lowercase line name, e.g. `kr`), `<CC>` (uppercase count
    ```bash
    mkdir -p <BASE>/scan-<CC> && printf 'vpn\nvpn\n' > <BASE>/scan-<CC>/auth.txt && chmod 600 <BASE>/scan-<CC>/auth.txt
    python3 <BASE>/fetch.py <CC> <BASE>/scan-<CC> 8          # TCP first, then UDP; by ping, then speed
-   docker run --rm --memory 48m --cap-add NET_ADMIN --device /dev/net/tun \
+   docker run --rm --dns 8.8.8.8 --memory 48m --cap-add NET_ADMIN --device /dev/net/tun \
      -e VPSIP=<VPS_IP> -e LIMIT=8 -v <BASE>/scan-<CC>:/scan --entrypoint sh homeline-gw:v2 /scan.sh <CC>
    ```
    `auth.txt` is the VPN Gate public login (two lines `vpn` / `vpn`), required by both scan and gateway. Output `WORKING <CC> try=N` writes `scan-<CC>/working-<CC>.ovpn`; `NONE` = report "这个国家现在没有可用节点" (Section 0B R2). `fetch.py` skips SoftEther space (AS36599, `219.100.37.x`) by default because it is the VPN Gate operator's own network, not consumer broadband; if only those exist it warns, and `--allow-softether` may be used ONLY with the operator's consent and a "非家宽" label. `--tcp-only` restores the old behaviour.
@@ -205,11 +217,11 @@ Placeholders: `<NAME>` (lowercase line name, e.g. `kr`), `<CC>` (uppercase count
    mkdir -p <LINE_DIR>/ovpn && cd <LINE_DIR>
    printf 'GATE_USER=gw%s\nGATE_PASS=%s\n' "$(openssl rand -hex 3)" "$(openssl rand -hex 16)" > .env && chmod 600 .env
    cp <BASE>/scan-<CC>/working-<CC>.ovpn ovpn/client.ovpn && cp <BASE>/scan-<CC>/auth.txt ovpn/auth.txt && chmod 600 ovpn/*
-   docker run -d --name vpngw-<NAME>-gateway --restart unless-stopped --memory 48m \
+   docker run -d --name vpngw-<NAME>-gateway --restart unless-stopped --dns 8.8.8.8 --memory 48m \
      --cap-add NET_ADMIN --device /dev/net/tun --env-file .env \
      -p 127.0.0.1:<SOCKS_PORT>:1080 -v <LINE_DIR>/ovpn:/vpn homeline-gw:v2
    ```
-   (Or `templates/docker-compose.yml.example`, same parameters.) Names must be exactly `GATE_USER`/`GATE_PASS`. SOCKS must stay on `127.0.0.1`.
+   (Or `templates/docker-compose.yml.example`, same parameters.) `--dns 8.8.8.8` (any public resolver) is mandatory on every provider: containers otherwise inherit the host resolver, which on clouds is often a link-local metadata address (e.g. `169.254.169.254`) that becomes unreachable once OpenVPN routes `0.0.0.0/1` + `128.0.0.0/1` through the tunnel. Names must be exactly `GATE_USER`/`GATE_PASS`. SOCKS must stay on `127.0.0.1`.
 6. **Standalone Xray (never the panel's).** Download the official release for `uname -m` (`Xray-linux-64.zip` / `Xray-linux-arm64-v8a.zip`) from `https://github.com/XTLS/Xray-core/releases/latest` into `/etc/xray-home-<NAME>/`, `chmod +x`. Generate and parse keys with a regex that works across versions (26.x prints `PrivateKey:` and `Password (PublicKey):`; older prints `Private key:` / `Public key:`):
    ```bash
    X=/etc/xray-home-<NAME>; K=$($X/xray x25519)
@@ -218,7 +230,7 @@ Placeholders: `<NAME>` (lowercase line name, e.g. `kr`), `<CC>` (uppercase count
    [ -n "$PRIV" ] && [ -n "$PUB" ] || { echo "KEY PARSE FAILED:"; echo "$K"; }   # STOP, show raw output
    UUID=$($X/xray uuid); SID=$(openssl rand -hex 8)
    ```
-7. **Xray config** from `templates/xray-config.json.example`: replace every `<...>` (ports as numbers, `GATE_USER`/`GATE_PASS` from `.env`), `chmod 600`, then `grep -c '<' config.json` must print `0` and `$X/xray run -test -c $X/config.json` must print `Configuration OK`.
+7. **Xray config** from `templates/xray-config.json.example`: replace every `<...>` (ports are unquoted numbers in the template — keep them numbers; a quoted port fails on Xray 26.x with `cannot unmarshal string into ... uint16`; `GATE_USER`/`GATE_PASS` from `.env`), `chmod 600`, then `grep -c '<' config.json` must print `0` and `$X/xray run -test -c $X/config.json` must print `Configuration OK`.
 8. **systemd** `/etc/systemd/system/xray-home-<NAME>.service`: `ExecStart=$X/xray run -c $X/config.json`, `Restart=always`, `After=network-online.target docker.service`; `systemctl daemon-reload && systemctl enable --now xray-home-<NAME>`; `ss -lnt | grep <XRAY_PORT>`.
 9. **Firewall:** OS (`ufw allow <XRAY_PORT>/tcp` or iptables) AND cloud security group. Only add rules; never change existing ones.
 10. **First probe:** `. <LINE_DIR>/.env; curl -s -m 20 --socks5-hostname 127.0.0.1:<SOCKS_PORT> --proxy-user "$GATE_USER:$GATE_PASS" https://api.ipify.org` (allow ~30 s after start). Write the link (Section 4 format) to `$X/client.txt` (600) with label `Home-<MEASURED_CC>`.
@@ -232,6 +244,7 @@ Do every item, in order. A link that has not passed V1-V4 must not be delivered 
 - V1 SOCKS exit exists: the Section 3 step-10 curl returns an IP. If empty after ~1 min: read `docker logs --tail 100 vpngw-<NAME>-gateway`; classify (no nodes for country / all AUTH_FAILED / TUN problem / list source unreachable) and report that class. Do not retry blindly more than twice.
 - V2 No leak: the SOCKS exit IP must differ from the VPS's own public IP (`curl -s https://api.ipify.org` without proxy). Equal means traffic is bypassing the tunnel (impossible with the v2 kill switch unless the image is wrong); `heal.sh` treats it as `LEAK` and rescans immediately. If you see it in manual testing, stop delivery and fix routing before anything else.
 - V3 Country + ISP measured: query a geolocation source for the exit IP and record country code, city, ISP/org. Compare with the operator's requested country and run the Section 0B R4 decision loop on any mismatch. Residential-vs-datacenter judgement: read the ISP/org name and any hosting/datacenter flag your lookup provides (e.g. ip-api's `hosting` field — whether your chosen lookup exposes it is **待实测确认** at runtime). A big-brand ISP/consumer broadband org is consistent with residential; a cloud/hosting org means this node is probably a datacenter in disguise — say so, offer rotate (R4 option 2), and never label it 家宽/residential to the operator.
+- V4a External real-client check (server side of V4): run a real Xray client with the delivered link on a machine OUTSIDE the VPS and fetch `https://www.cloudflare.com/cdn-cgi/trace` through it (`loc=` must match V3). If your own machine cannot (e.g. its egress proxy answers HTTP 407, or outbound non-HTTP ports are blocked), use any other independent machine you legitimately control (a second VPS, a CI runner, the operator's PC) — never the target VPS itself. Say which machine type did the check.
 - V4 Client end-to-end (mandatory): import the exact delivered `vless://` link (or its QR) into the chosen real client on a real device/network, open an IP-lookup page through it, and confirm (a) the page loads, (b) the shown IP/country matches the V3 measurement (allowing for the exit having rotated since — if it changed, re-measure and re-report). A server-side curl through SOCKS (V1-V3) is necessary but NOT a substitute for V4: Reality/SNI/firewall problems only show up from a real client.
 - V5 QR decodes to the same link: generate with `templates/make_sub_qr.py`, then run its `--verify` (or scan with the actual phone camera during V4). If OpenCV is absent the script prints `QR_DECODE_SKIPPED` — then the phone scan in V4 is the decode check, and you must say which one actually happened.
 - V6 Health mode is chosen and proven (Section 6). Either (a) **minute-check-only** (default, valid): the gateway's built-in data-plane watchdog is running — prove it once by killing OpenVPN in the container (`docker exec vpngw-<NAME>-gateway pkill openvpn`): the SOCKS probe must return nothing (kill switch) and the container must restart within ~1-3 min (`docker inspect -f '{{.RestartCount}}'`); dead nodes are swapped by hand/on request. Or (b) **minute-check + heal patrol**: additionally one `heal.sh` run has completed and written its status/log. Record which mode the operator chose.
@@ -293,6 +306,10 @@ Do not deliver: the agent's private key, raw `.env` contents, Reality private ke
 | `cat: can't open '/tmp/ovpn.pid'` in gateway log, container never restarts after OpenVPN dies | Old entrypoint used a pidfile that OpenVPN deletes on exit | Use the current `gateway-v2-entrypoint.sh.example` (`pgrep -x openvpn`), rebuild image, recreate container. |
 | Key parse empty after `xray x25519` | 26.x labels `PrivateKey:` / `Password (PublicKey):` | Use the regex in Section 3 step 6; on failure print raw output and stop. |
 | JP exit is `SoftEther` / AS36599 | VPN Gate's own operator space (`219.100.37.x`) | Not 家宽. `fetch.py` skips it by default; only use with `--allow-softether` + operator consent + 非家宽 label. |
+| Scan says `NOEXIT_OR_LEAK`/`NODNS` for many nodes; inside a tunnel container `ping <IP>` / `curl https://1.1.1.1` works but domains fail | Container uses the host's link-local/metadata resolver, unreachable through the tunnel (field case GCP) | Recreate scan/gateway containers with `--dns 8.8.8.8`; rescan. |
+| `xray run -test`: `cannot unmarshal string into ... uint16` | Port written as a string in config | Ports must be JSON numbers; fix and re-run `xray run -test`. |
+| SSH suddenly `Permission denied (publickey)` on a cloud VM that worked before | Guest agent / OS Login rewrote `authorized_keys` | Redo the key handoff (web console if needed). |
+| Phone times out on a VPC cloud, OS firewall open | VPC/security-group ingress rule missing | Add an allow rule for only the new ports in the cloud firewall. |
 | `AUTH_FAILED` in gateway logs | That volunteer node's credentials/service reject the standard VPN Gate login | Expected background noise (scan skips it immediately; a gateway hitting it just restarts and usually reconnects); only actionable if it is every node for a country — then see row 1. |
 | QR scans but client says invalid link | QR encodes a truncated/edited link, or client lacks Reality support | V5 verify output vs the stored link; confirm client/version supports VLESS+Reality+Vision; regenerate the QR from the stored `client.txt`, never by retyping. |
 | Everything worked yesterday, all lines down today | VPS-level event (reboot, Docker down, firewall reset) before any line-level theory | Check `systemctl is-active docker`, each `xray-home-<NAME>`, and `docker ps` first; check the VPS was not suspended by the provider. Only then debug individual lines. |
