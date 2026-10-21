@@ -2,7 +2,7 @@
 # OPTIONAL patrol/self-heal (node swap). The gateway's own minute check already restarts stalled tunnels;
 # this script additionally replaces a dead node. usage: heal.sh CC CONTAINER LINE_DIR SOCKS_PORT
 # Parameters via env (defaults shown): HOMELINE_BASE=/opt/homeline  GATEWAY_IMAGE=homeline-gw:v2
-#   VPS_IP=<auto: curl ipify direct>  SCAN_MAX=5  FAIL_BEFORE_SCAN=2
+#   VPS_IP=<auto: curl ipify direct>  GATEWAY_DNS=8.8.8.8  SCAN_MAX=5  FAIL_BEFORE_SCAN=2
 # LINE_DIR must contain .env, ovpn/client.ovpn, ovpn/auth.txt. HOMELINE_BASE must contain fetch.py.
 # Only the OpenVPN node is swapped; Xray UUID/port/Reality keys/link are never touched.
 set -u
@@ -37,7 +37,7 @@ flock -w 200 9 || { log "another scan running, skip"; exit 0; }
 cp "$DIR/ovpn/auth.txt" "$W/auth.txt"; chmod 600 "$W/auth.txt"
 log "rescan: $(python3 "$BASE/fetch.py" "$CC" "$W" "$SCAN_MAX" "$DIR/ovpn/client.ovpn" 2>&1 | tail -1)"
 rm -f "$W/working-$CC.ovpn"
-docker run --rm --memory 48m --cap-add=NET_ADMIN --device=/dev/net/tun -e VPSIP="$VPSIP" -e LIMIT="$SCAN_MAX" \
+docker run --rm --dns "${GATEWAY_DNS:-8.8.8.8}" --memory 48m --cap-add=NET_ADMIN --device=/dev/net/tun -e VPSIP="$VPSIP" -e LIMIT="$SCAN_MAX" \
   -v "$W":/scan --entrypoint sh "$IMAGE" /scan.sh "$CC" 2>&1 | tail -n $((SCAN_MAX+1)) >> "$LOG"
 if [ -f "$W/working-$CC.ovpn" ]; then
   cat "$W/working-$CC.ovpn" > "$DIR/ovpn/client.ovpn"; chmod 600 "$DIR/ovpn/client.ovpn"

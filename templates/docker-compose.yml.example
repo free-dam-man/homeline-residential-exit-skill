@@ -9,6 +9,7 @@ services:
     cap_add: [NET_ADMIN]
     devices: [/dev/net/tun]
     mem_limit: 48m
+    dns: [8.8.8.8, 1.1.1.1]          # public resolver: provider metadata DNS dies once the tunnel takes the default route
     ports:
       # SOCKS only on loopback. 0.0.0.0 here is a security incident.
       - "127.0.0.1:<SOCKS_PORT>:1080"

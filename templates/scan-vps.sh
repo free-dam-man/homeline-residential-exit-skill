@@ -46,6 +46,9 @@ kv iptables_bin "$(has iptables && iptables --version 2>/dev/null | head -1 || e
 sec network
 kv ipv4_public "$(T 8 curl -4 -s https://api.ipify.org 2>/dev/null || echo none)"
 kv ipv6_public "$(T 8 curl -6 -s https://api64.ipify.org 2>/dev/null || echo none)"
+RES=$(awk '$1=="nameserver"{printf "%s ",$2}' /etc/resolv.conf 2>/dev/null)
+kv resolvers "${RES:-none}"
+case "$RES" in *169.254.*|*127.0.0.53*|*fd00:ec2*) kv resolver_verdict "LOCAL/METADATA resolver -> containers MUST run with --dns 8.8.8.8 (or another public resolver)";; *) kv resolver_verdict "ok (still use --dns 8.8.8.8 for gateway/scan containers)";; esac
 kv default_iface "$(ip route show default 2>/dev/null | awk '{print $5;exit}')"
 INFO=$(T 10 curl -s "http://ip-api.com/line?fields=countryCode,isp,org,as,hosting" 2>/dev/null | tr '\n' '|')
 kv vps_ip_info "${INFO:-lookup failed} (countryCode|isp|org|as|hosting)"

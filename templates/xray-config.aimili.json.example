@@ -2,7 +2,7 @@
   "log": { "loglevel": "warning" },
   "inbounds": [
     {
-      "port": "<XRAY_PORT>",
+      "port": <XRAY_PORT>,
       "protocol": "vless",
       "settings": {
         "clients": [{ "id": "<UUID_GENERATE_WITH_XRAY_UUID>", "flow": "xtls-rprx-vision" }],
@@ -24,7 +24,7 @@
     {
       "protocol": "socks",
       "settings": {
-        "servers": [{ "address": "127.0.0.1", "port": "<SOCKS_PORT>" }]
+        "servers": [{ "address": "127.0.0.1", "port": <SOCKS_PORT> }]
       }
     },
     { "tag": "block", "protocol": "blackhole" }
