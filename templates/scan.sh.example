@@ -1,20 +1,27 @@
 #!/bin/sh
-# usage: scan.sh CC  (env VPSIP, LIMIT) ; candidates in /scan/cand-CC-*.ovpn
+# usage: scan.sh CC  (env VPSIP, LIMIT) ; candidates in /scan/cand-CC-*.ovpn, login in /scan/auth.txt
+# Skips a node immediately on any known OpenVPN failure marker instead of waiting out the timeout
+# (marker list idea adapted from vpnbox, MIT, https://github.com/sajadinmaker/vpnbox).
 CC="$1"; LIMIT=${LIMIT:-5}; n=0
-for f in /scan/cand-${CC}-*.ovpn; do
-  [ -f "$f" ] || continue; n=$((n+1)); [ $n -gt $LIMIT ] && break
+FAIL_RE='Options error|AUTH_FAILED|Cannot resolve host|Connection refused|Connection timed out|Connection reset by peer|No route to host|Network is unreachable|Error opening configuration file|Failed to establish|TUNSETIFF failed|All connections have been|Exiting due to fatal error'
+for f in /scan/cand-"${CC}"-*.ovpn; do
+  [ -f "$f" ] || continue; n=$((n+1)); [ "$n" -gt "$LIMIT" ] && break
   rm -f /tmp/o.log
   openvpn --config "$f" --auth-user-pass /scan/auth.txt --daemon --log /tmp/o.log
-  ok=""
-  for i in $(seq 1 22); do grep -q "Initialization Sequence Completed" /tmp/o.log && ok=1 && break; grep -q "AUTH_FAILED" /tmp/o.log && break; sleep 1; done
+  ok=""; why="timeout"
+  for _ in $(seq 1 22); do
+    grep -q "Initialization Sequence Completed" /tmp/o.log 2>/dev/null && ok=1 && break
+    m=$(grep -oE "$FAIL_RE" /tmp/o.log 2>/dev/null | head -1); [ -n "$m" ] && why="$m" && break
+    sleep 1
+  done
   if [ -n "$ok" ]; then
     out=$(curl -s -m 12 https://api.ipify.org)
     if [ -n "$out" ] && [ "$out" != "$VPSIP" ]; then
       c=$(curl -s -m 10 "http://ip-api.com/line/$out?fields=countryCode")
-      if [ "$c" = "$CC" ]; then echo "WORKING $CC try=$n"; cp "$f" /scan/working-${CC}.ovpn; exit 0; fi
+      if [ "$c" = "$CC" ]; then echo "WORKING $CC try=$n"; cp "$f" "/scan/working-${CC}.ovpn"; exit 0; fi
       echo "WRONGCC $CC try=$n got=$c"
     else echo "NOEXIT_OR_LEAK $CC try=$n"; fi
-  else echo "FAIL $CC try=$n"; fi
+  else echo "FAIL $CC try=$n ($why)"; fi
   pkill openvpn 2>/dev/null; sleep 2
 done
 echo "NONE $CC tried=$n"; exit 1

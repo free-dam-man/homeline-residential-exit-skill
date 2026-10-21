@@ -1,7 +1,9 @@
-# /etc/systemd/system/homeline-heal-<cc>.timer  — default every 12 hours (adjustable: change OnCalendar,
-# e.g. *:0/30 for 30 min). Pair with homeline-heal-<cc>.service (below).
+# OPTIONAL. Only install if the operator wants scheduled node swapping; "minute-check-only" mode
+# (gateway watchdog alone, human fixes dead nodes on request) is a valid, supported choice.
+# Replace <cc>/<CC>/<...>. Interval is the operator's choice (12h shown; *:0/30 = every 30 min).
+# /etc/systemd/system/homeline-heal-<cc>.timer
 [Unit]
-Description=Run homeline heal <CC> every 12 hours
+Description=Homeline heal <CC>
 [Timer]
 OnCalendar=*-*-* 00/12:07:00
 RandomizedDelaySec=300
@@ -19,4 +21,5 @@ WantedBy=timers.target
 # Nice=10
 # MemoryMax=80M
 # TimeoutStartSec=280
-# ExecStart=/root/homeline-test/heal/heal.sh <CC> <gateway_container> /root/homeline-test/<routea_dir> <socks_port>
+# Environment=HOMELINE_BASE=<HOMELINE_BASE> GATEWAY_IMAGE=<GATEWAY_IMAGE>
+# ExecStart=<HOMELINE_BASE>/heal/heal.sh <CC> vpngw-<cc>-gateway <LINE_DIR> <SOCKS_PORT>

@@ -16,7 +16,7 @@ check_line() {
   exit_ip=$(curl -s -m 20 --socks5-hostname "127.0.0.1:${socks_port}" \
     --proxy-user "${gate_user}:${gate_pass}" https://api.ipify.org || true)
   if [ -z "${exit_ip}" ]; then
-    echo "[${country}] SOCKS no exit (count++ ; manager should rotate after its own FAIL_THRESHOLD)"
+    echo "[${country}] SOCKS no exit (count++ ; gateway watchdog restarts stalled tunnels; optional heal.sh swaps dead nodes)"
     return 1
   fi
   if [ "${exit_ip}" = "${vps_ip}" ]; then

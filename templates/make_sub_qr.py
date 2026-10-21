@@ -14,7 +14,7 @@ Usage:
 
 The link/URL is a credential. Pass it via environment or argument at run
 time; never hard-code a real link into this file or commit the PNG.
-Requires: pip install "qrcode[pil]"   (verify step also uses opencv-python if present)
+Requires: pip install "qrcode[pil]"   (verify: opencv-python or zxing-cpp; on PEP 668 distros add --break-system-packages or use a venv)
 """
 import argparse, os, sys
 
@@ -39,14 +39,30 @@ def make_qr(url: str, output: str) -> None:
     qr.make_image(fill_color="black", back_color="white").save(output)
     print(f"saved {output} ({os.path.getsize(output)} bytes)")
 
-def verify(path: str, expected: str) -> None:
+def _decode(path: str):
     try:
         import cv2
+        data, _, _ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(path))
+        if data:
+            return data, "opencv"
     except ImportError:
-        print("QR_DECODE_SKIPPED: opencv not installed; scan-test with the real phone before delivery")
+        pass
+    try:
+        import zxingcpp
+        from PIL import Image
+        res = zxingcpp.read_barcodes(Image.open(path))
+        return (res[0].text if res else ""), "zxing-cpp"
+    except ImportError:
+        return None, None
+
+def verify(path: str, expected: str) -> None:
+    data, engine = _decode(path)
+    if engine is None:
+        print("QR_DECODE_SKIPPED: install opencv-python or zxing-cpp "
+              "(Debian 12+/Ubuntu 24+: pip install --break-system-packages zxing-cpp pillow), "
+              "or scan-test with the real phone before delivery")
         return
-    data, _, _ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(path))
-    print("decoded: <link redacted; length %d>" % len(data))
+    print("decoded via %s: <link redacted; length %d>" % (engine, len(data)))
     print(f"QR_DECODE_MATCH={data == expected}")
     if data != expected:
         sys.exit(1)

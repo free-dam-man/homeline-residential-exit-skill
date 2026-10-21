@@ -24,3 +24,5 @@ Hard rules distilled from this pass (apply to any future candidate):
    /var/run/docker.sock each disqualify a project as the beginner default.
 3. curl|bash installers are read-first artifacts: download, checksum/record the commit, read, then run.
 4. Floating tags (:latest, main) are not a version. Pin it, or it is 待实测确认.
+
+| sajadinmaker/vpnbox — https://github.com/sajadinmaker/vpnbox | Single-file Python VPN Gate CLI client (reviewed 2026-10-21); same official API as this skill, no extra mirrors; no stall detection | MIT | IDEAS ONLY (credited in `fetch_candidates.py.example` / `scan.sh.example`): accept UDP nodes, drop invalid-ping rows and rank by ping/speed, skip a node immediately on known OpenVPN failure markers. No code copied verbatim. |

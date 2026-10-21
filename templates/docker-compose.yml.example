@@ -1,38 +1,18 @@
-# 家宽线路栈模板：复制到 VPS 的 ~/vpngw-<NAME>/docker-compose.yml 后替换所有 <...> 占位符。
-# 一国一条栈：换国家只改 NAME / COUNTRIES / 端口，目录、容器名、服务名都跟着 NAME 变，别共用。
-# 网关和管理器的 Dockerfile/entrypoint/管理器程序不在本模板里：
-# 部署时由 AI 按 SKILL.md 第 3 节从安装脚本的对应段落生成，或直接跑整段安装脚本，待实测确认你手头脚本版本与本模板字段一致后再手工拆分。
+# OPTIONAL compose form of the main-path gateway (equivalent to the `docker run` in SKILL.md Section 3, step 5).
+# Copy to <LINE_DIR>/docker-compose.yml, replace <...>. One gateway per country line; never share ports/dirs.
+# There is deliberately NO manager container and NO /var/run/docker.sock mount (see SKILL.md 2A: docker.sock = root-equivalent).
+# Node choice = scan.sh; optional node swapping = heal.sh on the host.
 services:
   gateway:
-    build: ./gateway
+    image: <GATEWAY_IMAGE>            # e.g. homeline-gw:v2, built from gateway-v2.Dockerfile.example
     container_name: vpngw-<NAME>-gateway
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun
-    sysctls:
-      net.ipv4.ip_forward: "1"
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    mem_limit: 48m
     ports:
-      # SOCKS 只绑本机回环：外网扫不到、连不上。改成 0.0.0.0 是安全事故，不许改。
+      # SOCKS only on loopback. 0.0.0.0 here is a security incident.
       - "127.0.0.1:<SOCKS_PORT>:1080"
     volumes:
-      - ./ovpn:/vpn
-      - ./state:/state
-    environment:
-      # 字段名必须是 GATE_USER / GATE_PASS，与 .env、管理器、Xray 出站三处完全一致。
-      GATE_USER: ${GATE_USER:?GATE_USER missing in .env}
-      GATE_PASS: ${GATE_PASS:?GATE_PASS missing in .env}
-    restart: unless-stopped
-  manager:
-    build: ./manager
-    container_name: vpngw-<NAME>-manager
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./ovpn:/ovpn
-      - ./state:/state
-    environment:
-      - COUNTRIES=<COUNTRY_CODE>
-      - GATEWAY_NAME=vpngw-<NAME>-gateway
-      - GATE_USER=${GATE_USER:?GATE_USER missing in .env}
-      - GATE_PASS=${GATE_PASS:?GATE_PASS missing in .env}
+      - ./ovpn:/vpn                   # client.ovpn + auth.txt (both 600)
+    env_file: .env                    # GATE_USER / GATE_PASS, exact names
     restart: unless-stopped
