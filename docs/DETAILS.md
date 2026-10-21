@@ -47,7 +47,7 @@
 
 ## 怎么用
 
-把整个仓库交给 AI。它不会问你密码：它先生成一把专用钥匙，给你一条命令粘到 VPS 终端执行，你只回 IP 和用户名（默认 root）。最后交付时附撤销命令 `sed -i '/homeline-agent$/d' ~/.ssh/authorized_keys`。连上后先跑只读扫描 `templates/scan-vps.sh`（不装、不改任何东西），再按扫描结果给你一份带默认值的方案（路线 A、国家 KR+US、空闲端口自动选、内存不足自动加 swap、缺 Docker 自动装、巡检默认关）。你回数字改某项，或者回「继续」；没反对就照默认开工。只有没有 TUN、会动到原有服务、或有破坏性操作时才停下等你。最后以实测出口国家 + 外部客户端连通为准交付。
+把整个仓库交给 AI。它不会问你密码：它先生成一把专用钥匙，给你一条命令粘到 VPS 终端执行，你只回 IP 和用户名（默认 root）。不会用终端也行：在 AI 的远程浏览器里打开 VPS 商家的网页控制台（如 Vultr View Console、Oracle Cloud Shell/串口控制台、AWS EC2 Instance Connect、GCP 浏览器 SSH、DigitalOcean Droplet Console、Linode Lish，仅举例），你自己登录，AI 来粘贴命令；SSH 不通就全程在网页终端里做。最后交付时附撤销命令 `sed -i '/homeline-agent$/d' ~/.ssh/authorized_keys`。连上后先跑只读扫描 `templates/scan-vps.sh`（不装、不改任何东西），再按扫描结果给你一份带默认值的方案（路线 A、国家 KR+US、空闲端口自动选、内存不足自动加 swap、缺 Docker 自动装、巡检默认关）。你回数字改某项，或者回「继续」；没反对就照默认开工。只有没有 TUN、会动到原有服务、或有破坏性操作时才停下等你。最后以实测出口国家 + 外部客户端连通为准交付。
 
 ## 文件清单
 
