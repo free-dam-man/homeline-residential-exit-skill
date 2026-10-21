@@ -15,7 +15,11 @@ Honesty baseline: this package was distilled from a working multi-country deploy
 
 Treat the target VPS as an unknown machine. Nothing in this skill assumes a provider, distro, port layout or existing software. Flow (the operator answers at most 1–2 times):
 
-1. **Ask once for access** (the only mandatory question): "把 VPS 的 SSH 登录方式发我（地址 + 密钥或密码，只在本次会话用）。" Never log into a server the operator did not hand over in this session.
+1. **Lock handoff for access (never ask for a password).** On YOUR machine generate a dedicated key once: `ssh-keygen -t ed25519 -N '' -C homeline-agent -f ~/.ssh/homeline_agent_ed25519` (or run `templates/grant-access.sh.example`, which prints the one-liner). Send the operator exactly ONE command to paste into their VPS terminal (replace `<PUBKEY>` with the full `.pub` line):
+   ```bash
+   mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && grep -qxF '<PUBKEY>' ~/.ssh/authorized_keys || echo '<PUBKEY>' >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys && echo "IP: $(curl -s4 -m 8 ifconfig.me || curl -s4 -m 8 api.ipify.org)  USER: $(whoami)"
+   ```
+   Ask only: "把这条命令粘到你 VPS 的终端里执行，然后把输出的 IP 和用户名回我（用户名一般是 root）。" Then connect with `ssh -i ~/.ssh/homeline_agent_ed25519 -o StrictHostKeyChecking=accept-new <USER>@<IP>`. The private key stays on your machine — never print, send, upload or commit it. If the user is not root, all build steps use `sudo`; no sudo → hard stop. Never log into a server the operator did not hand over in this session.
 2. **Run the read-only scan**: `bash templates/scan-vps.sh` (copy it over, or `ssh <target> 'bash -s' < templates/scan-vps.sh`). It installs nothing and changes nothing. Read every section.
 3. **Show ONE compact plan with defaults** (template below), built from the decision table. The operator may change any item by number, or just say 继续 / OK. **No objection = proceed.**
 4. **Build** (Sections 3–4), then deliver (Section 7).
@@ -253,9 +257,10 @@ Deliver, and nothing beyond this list needs the operator's attention:
 2. The QR PNG per link, with V5's decode result stated.
 3. A short measured-exit report per line: requested country, measured country/city/ISP, "exit IP will change" note, and which lines are heal-scope vs observe-only.
 4. Where things live on the VPS: line directory, unit name, status file path, and the two commands a human would need (`systemctl status xray-home-<NAME>`, `docker logs --tail 50 vpngw-<NAME>-gateway`).
-5. The Final Delivery Checklist, filled: Phase 0 scan summary + accepted plan (no secret values), country requested vs measured per line, V1-V6 results with method (server probe / phone client), Xray version installed, patrol armed yes/no, no-touch rule respected (existing panel untouched) yes/no, date.
+5. Key revoke command, always included: `sed -i '/homeline-agent$/d' ~/.ssh/authorized_keys` (operator runs it on the VPS when they no longer want the agent to have access; the line stays working until then).
+6. The Final Delivery Checklist, filled: Phase 0 scan summary + accepted plan (no secret values), country requested vs measured per line, V1-V6 results with method (server probe / phone client), Xray version installed, patrol armed yes/no, no-touch rule respected (existing panel untouched) yes/no, date.
 
-Do not deliver: raw `.env` contents, Reality private keys, SOCKS passwords, SSH credentials, or screenshots containing any of them.
+Do not deliver: the agent's private key, raw `.env` contents, Reality private keys, SOCKS passwords, SSH credentials, or screenshots containing any of them.
 
 ## 8. Troubleshooting
 
