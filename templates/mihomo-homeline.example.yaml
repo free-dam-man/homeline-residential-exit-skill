@@ -1,0 +1,212 @@
+# EXAMPLE ONLY — fake names, docs IPs, placeholder secrets.
+# Copy to your VPS, replace every <ANGLE_BRACKET> value, generate real UUIDs/keys locally.
+# Never commit a filled-in copy.
+#
+# Illustrates:
+#   - per-country sticky Docker SOCKS outbounds
+#   - per-country Mihomo OpenVPN hot-standby pools
+#   - fallback groups (sticky first, then pool)
+#   - optional CDN DIRECT offload (commented)
+#   - single VLESS+WS listener with per-user country routing (optional shape)
+#
+# Requires a Mihomo build that supports type: openvpn if you use the OVPN pool path.
+
+mixed-port: 0
+allow-lan: false
+mode: rule
+log-level: info
+ipv6: false
+
+dns:
+  enable: true
+  listen: 127.0.0.1:1053
+  enhanced-mode: fake-ip
+  nameserver:
+    - https://1.1.1.1/dns-query
+    - tcp://8.8.8.8:53
+
+# ---------------------------------------------------------------------------
+# Optional: one public listener, many users → country lines via IN-USER rules.
+# Prefer separate Xray VLESS+Reality inbounds per country if that is what you
+# already run; then delete this listeners block and point Xray at the groups.
+# ---------------------------------------------------------------------------
+listeners:
+  - name: vless-ws-in
+    type: vless
+    port: 18080
+    listen: 127.0.0.1
+    users:
+      - username: jp-user
+        uuid: 00000000-0000-4000-8000-000000000001
+      - username: hk-user
+        uuid: 00000000-0000-4000-8000-000000000002
+      - username: kr-user
+        uuid: 00000000-0000-4000-8000-000000000003
+      - username: gb-user
+        uuid: 00000000-0000-4000-8000-000000000004
+      - username: us-user
+        uuid: 00000000-0000-4000-8000-000000000005
+    ws-path: /ws-homeline-example
+    # tls / reality: configure on your edge; do not paste production keys here
+
+proxies:
+  # ---- sticky Docker SOCKS (loopback only) ----
+  - name: JP-DOCKER-STICKY
+    type: socks
+    server: 127.0.0.1
+    port: 11081
+    username: <JP_GATE_USER>
+    password: <JP_GATE_PASS>
+
+  - name: HK-DOCKER-STICKY
+    type: socks
+    server: 127.0.0.1
+    port: 11082
+    username: <HK_GATE_USER>
+    password: <HK_GATE_PASS>
+
+  - name: KR-DOCKER-STICKY
+    type: socks
+    server: 127.0.0.1
+    port: 11083
+    username: <KR_GATE_USER>
+    password: <KR_GATE_PASS>
+
+  - name: GB-DOCKER-STICKY
+    type: socks
+    server: 127.0.0.1
+    port: 11086
+    username: <GB_GATE_USER>
+    password: <GB_GATE_PASS>
+
+  - name: US-DOCKER-STICKY
+    type: socks
+    server: 127.0.0.1
+    port: 11087
+    username: <US_GATE_USER>
+    password: <US_GATE_PASS>
+
+  # ---- Mihomo userspace OpenVPN pool members (docs IPs) ----
+  # Fill cipher/auth/ca from your verified VPN Gate template; never commit real key PEMs.
+  - name: JP-OVPN-A
+    type: openvpn
+    server: 203.0.113.10
+    port: 1194
+    # cipher: AES-128-CBC
+    # auth: SHA1
+    # ca: <PATH_OR_INLINE_PLACEHOLDER>
+
+  - name: JP-OVPN-B
+    type: openvpn
+    server: 203.0.113.11
+    port: 443
+
+  - name: HK-OVPN-A
+    type: openvpn
+    server: 198.51.100.10
+    port: 1194
+
+  - name: KR-OVPN-A
+    type: openvpn
+    server: 203.0.113.20
+    port: 1194
+
+  - name: GB-OVPN-A
+    type: openvpn
+    server: 198.51.100.20
+    port: 5555
+
+  - name: GB-OVPN-B
+    type: openvpn
+    server: 198.51.100.21
+    port: 1194
+
+  - name: US-OVPN-A
+    type: openvpn
+    server: 203.0.113.30
+    port: 1194
+
+proxy-groups:
+  - name: JP-OVPN-POOL
+    type: url-test
+    proxies: [JP-OVPN-A, JP-OVPN-B]
+    url: http://www.gstatic.com/generate_204
+    interval: 120
+    tolerance: 50
+
+  - name: HK-OVPN-POOL
+    type: url-test
+    proxies: [HK-OVPN-A]
+    url: http://www.gstatic.com/generate_204
+    interval: 120
+    tolerance: 50
+
+  - name: KR-OVPN-POOL
+    type: url-test
+    proxies: [KR-OVPN-A]
+    url: http://www.gstatic.com/generate_204
+    interval: 120
+    tolerance: 50
+
+  - name: GB-OVPN-POOL
+    type: url-test
+    proxies: [GB-OVPN-A, GB-OVPN-B]
+    url: http://www.gstatic.com/generate_204
+    interval: 120
+    tolerance: 50
+
+  - name: US-OVPN-POOL
+    type: url-test
+    proxies: [US-OVPN-A]
+    url: http://www.gstatic.com/generate_204
+    interval: 120
+    tolerance: 50
+
+  # sticky first, pool second
+  - name: JP-LINE
+    type: fallback
+    proxies: [JP-DOCKER-STICKY, JP-OVPN-POOL]
+    url: http://www.gstatic.com/generate_204
+    interval: 60
+
+  - name: HK-LINE
+    type: fallback
+    proxies: [HK-DOCKER-STICKY, HK-OVPN-POOL]
+    url: http://www.gstatic.com/generate_204
+    interval: 60
+
+  - name: KR-LINE
+    type: fallback
+    proxies: [KR-DOCKER-STICKY, KR-OVPN-POOL]
+    url: http://www.gstatic.com/generate_204
+    interval: 60
+
+  - name: GB-LINE
+    type: fallback
+    proxies: [GB-DOCKER-STICKY, GB-OVPN-POOL]
+    url: http://www.gstatic.com/generate_204
+    interval: 60
+
+  - name: US-LINE
+    type: fallback
+    proxies: [US-DOCKER-STICKY, US-OVPN-POOL]
+    url: http://www.gstatic.com/generate_204
+    interval: 60
+
+rules:
+  # Optional CDN DIRECT offload — OFF by default. Uncomment only if you accept
+  # those domains exiting via the VPS (often datacenter) IP.
+  # - DOMAIN-SUFFIX,googlevideo.com,DIRECT
+  # - DOMAIN-SUFFIX,ytimg.com,DIRECT
+  # - DOMAIN-SUFFIX,akamai.net,DIRECT
+  # - DOMAIN-SUFFIX,cloudfront.net,DIRECT
+
+  # Per-user → country line (only if using the listeners block above)
+  - IN-USER,jp-user,JP-LINE
+  - IN-USER,hk-user,HK-LINE
+  - IN-USER,kr-user,KR-LINE
+  - IN-USER,gb-user,GB-LINE
+  - IN-USER,us-user,US-LINE
+
+  # Safe default if no user matched: fail closed rather than VPS egress
+  - MATCH,REJECT
